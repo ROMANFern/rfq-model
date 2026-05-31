@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: tricab-rfq-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt && python download_model.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: starter          # 512MB RAM — sufficient for T5-small
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false        # set manually in Render dashboard
+      - key: MODEL_DRIVE_URL
+        sync: false        # set manually — your Google Drive folder share link
+      - key: MODEL_DIR
+        value: ./model
+      - key: DATA_DIR
+        value: ./data
