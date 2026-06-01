@@ -4,12 +4,16 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt && python download_model.py
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    plan: starter          # 512MB RAM — sufficient for T5-small
+    plan: starter
     envVars:
       - key: ANTHROPIC_API_KEY
-        sync: false        # set manually in Render dashboard
-      - key: MODEL_DRIVE_URL
-        sync: false        # set manually — your Google Drive folder share link
+        sync: false
+      - key: MODEL_FILE_ID
+        sync: false        # Google Drive file ID for model.safetensors
+      - key: CONFIG_FILE_ID
+        sync: false        # Google Drive file ID for config.json
+      - key: GEN_CONFIG_FILE_ID
+        sync: false        # Google Drive file ID for generation_config.json
       - key: MODEL_DIR
         value: ./model
       - key: DATA_DIR

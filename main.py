@@ -17,7 +17,7 @@ from anthropic import Anthropic
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from transformers import T5ForConditionalGeneration, T5Tokenizer
+from transformers import T5ForConditionalGeneration, AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -59,7 +59,9 @@ async def lifespan(app: FastAPI):
     # T5 model
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log.info(f"Loading T5 from {MODEL_DIR} on {device.upper()}")
-    tokenizer = T5Tokenizer.from_pretrained(MODEL_DIR)
+    log.info("Loading T5 tokenizer from HuggingFace (google-t5/t5-small)")
+    tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
+    log.info(f"Loading T5 weights from {MODEL_DIR} on {device.upper()}")
     model = T5ForConditionalGeneration.from_pretrained(MODEL_DIR).to(device)
     model.eval()
     state["tokenizer"] = tokenizer
