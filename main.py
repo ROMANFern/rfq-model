@@ -12,12 +12,10 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import pandas as pd
-import torch
 from anthropic import Anthropic
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from transformers import T5ForConditionalGeneration, AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -36,43 +34,22 @@ state = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("Loading data and model...")
+    log.info("Loading data...")
 
-    # Data tables
     tpro  = pd.read_csv(f"{DATA_DIR}/tpro_ext.csv")
     specs = pd.read_csv(f"{DATA_DIR}/cable_specs.csv")
 
-    # Product code lookup set — O(1) existence checks
     state["product_codes"] = set(tpro["product_code"].values)
 
-    # Style index — valid options per style
     with open(f"{DATA_DIR}/style_index.json") as f:
         state["style_index"] = json.load(f)
 
-    # Style descriptions
     desc = pd.read_csv(f"{DATA_DIR}/descript.csv")
     state["desc_map"] = dict(zip(desc["desc_code"], desc["desc_name"]))
-
-    # cable_specs for fuzzy validation (style + nc + xa)
     state["specs"] = specs
-
-    # T5 model
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    log.info(f"Loading T5 from {MODEL_DIR} on {device.upper()}")
-    log.info("Loading T5 tokenizer from HuggingFace (google-t5/t5-small)")
-    tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
-    log.info(f"Loading T5 weights from {MODEL_DIR} on {device.upper()}")
-    model = T5ForConditionalGeneration.from_pretrained(MODEL_DIR).to(device)
-    model.eval()
-    state["tokenizer"] = tokenizer
-    state["model"]     = model
-    state["device"]    = device
-
-    # Anthropic client
     state["anthropic"] = Anthropic()
 
-    log.info(f"Ready — {len(state['product_codes'])} product codes loaded, "
-             f"{len(state['style_index'])} styles indexed")
+    log.info(f"Ready — {len(state['product_codes'])} product codes loaded")
     yield
     state.clear()
 
@@ -204,32 +181,6 @@ def stage1_normalise(rfq_text: str) -> dict:
     raw = re.sub(r"```json|```", "", raw).strip()
     return json.loads(raw)
 
-
-# ── Stage 2: T5 prediction ────────────────────────────────────────────────────
-
-def stage2_predict(structured_text: str) -> str:
-    tok   = state["tokenizer"]
-    model = state["model"]
-    dev   = state["device"]
-
-    inp = tok(
-        "generate product code: " + structured_text,
-        max_length=MAX_INPUT_LEN,
-        padding="max_length",
-        truncation=True,
-        return_tensors="pt",
-    )
-    with torch.no_grad():
-        out = model.generate(
-            input_ids=inp.input_ids.to(dev),
-            attention_mask=inp.attention_mask.to(dev),
-            max_length=MAX_TARGET_LEN,
-            num_beams=5,
-            early_stopping=True,
-        )
-    return tok.decode(out[0], skip_special_tokens=True).strip()
-
-
 # ── Stage 3: tpro_ext validation ──────────────────────────────────────────────
 
 def stage3_validate(claude_result: dict, t5_code: str) -> dict:
@@ -327,27 +278,12 @@ async def generate(req: GenerateRequest):
         raise HTTPException(status_code=400, detail="Empty input")
 
     try:
-        # Stage 1 — Claude normalisation
-        log.info(f"Stage 1 — normalising: {req.text[:80]}")
+        log.info(f"Normalising: {req.text[:80]}")
         claude_result = stage1_normalise(req.text)
+        log.info(f"Claude result: {claude_result.get('product_code')} | {claude_result.get('overall_confidence')}")
 
-        # Stage 2 — T5 prediction (use Claude's normalised text as input)
-        # Build a structured description string from Claude's segments
-        seg_map = {s["key"]: s["value"] for s in claude_result.get("segments", [])}
-        structured = (
-            f"{seg_map.get('no_core','?')}{seg_map.get('core_type','C')} "
-            f"{seg_map.get('cross_section','?')}mm2 "
-            f"{seg_map.get('conductor','N')} "
-            f"{seg_map.get('style_code','')} "
-            f"{seg_map.get('armour','X')} "
-            f"{seg_map.get('colour','BK')}"
-        )
-        log.info(f"Stage 2 — T5 input: {structured}")
-        t5_code = stage2_predict(structured)
-        log.info(f"Stage 2 — T5 output: {t5_code}")
-
-        # Stage 3 — validation
-        final = stage3_validate(claude_result, t5_code)
+        final = stage3_validate(claude_result, None)
+        log.info(f"Final: {final.get('product_code')} | {final.get('overall_confidence')} | exists={final.get('variant_exists')}")
 
         return GenerateResponse(
             product_code=final.get("product_code", ""),

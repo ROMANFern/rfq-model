@@ -2,7 +2,7 @@ services:
   - type: web
     name: tricab-rfq-api
     runtime: python
-    buildCommand: pip install -r requirements.txt && python download_model.py
+    buildCommand: buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     plan: starter
     envVars:
